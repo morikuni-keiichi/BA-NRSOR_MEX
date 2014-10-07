@@ -10,6 +10,24 @@ int m, maxit, n, nin;
 // mwIndex nnz;
 
 
+// How to use
+void usage()
+{
+    mexPrintf("BANRSOR: BA-GMRES method preconditioned by NR-SOR inner iterations\n");
+    mexPrintf("This Matlab-MEX function solves linear least squares problems.\n");
+    mexPrintf("  x = BANRSOR(A, b);\n");
+    mexPrintf("  [x, relres, iter] = BANRSOR(A, b, tol, maxit);\n\n");
+    mexPrintf("  valuable | size | remark \n");
+    mexPrintf("  A         m-by-n   coefficient matrix. must be sparse array.\n");
+    mexPrintf("  b         m-by-1   right-hand side vector\n");
+    mexPrintf("  tol       scalar   tolerance for stopping criterion.\n");
+    mexPrintf("  maxit     scalar   maximum number of iterations.\n");
+    mexPrintf("  x         n-by-1   resulting approximate solution.\n");
+    mexPrintf("  relres   iter-by-1 relative residual history.\n");
+    mexPrintf("  iter      scalar   number of iterations required for convergence.\n");
+}
+
+
 // 2-norm
 double nrm2(double *x, mwSize k) {
 
@@ -25,7 +43,7 @@ double nrm2(double *x, mwSize k) {
 	    		scale = absxi;
 	    	} else {
 	    		tmp = absxi/scale;
-	    		ssq = ssq + tmp*tmp;
+	    		ssq += tmp*tmp;
 			}
 		}
 	}
@@ -94,7 +112,7 @@ void NRSOR(double *rhs, double *x)
 			if (k == nin && j == n-1) return;
 			for (l=k1; l<k2; l++) {
 				i = ia[l];
-				rhs[i] = rhs[i] - d*AC[l];
+				rhs[i] -= d*AC[l];
 			}
 		}
 	}
@@ -138,7 +156,7 @@ void opNRSOR(double *rhs, double *x)
 			x[j] = x[j] + d;
 			for (l=k1; l<k2; l++) {
 				i = ia[l];
-				rhs[i] = rhs[i] - d*AC[l];
+				rhs[i] -= d*AC[l];
 			}
 		}
 
@@ -179,10 +197,10 @@ void opNRSOR(double *rhs, double *x)
 				d = zero;
 				for (l=k1; l<k2; l++) d += AC[l]*rhs[ia[l]];
 				d = omg * d * Aei[j];			
-				x[j] = x[j] + d;
+				x[j] += d;
 				for (l=k1; l<k2; l++) {
 					ii = ia[l];
-					rhs[ii] = rhs[ii] - d*AC[l];
+					rhs[ii] -= d*AC[l];
 				}
 			}
 		}
@@ -191,7 +209,7 @@ void opNRSOR(double *rhs, double *x)
 
 		if (k < 19) {
 			if (res1 > res2) {
-				omg = omg + 1.0e-1;
+				omg += 1.0e-1;
 				for (j=0; j<n; j++) x[j] = y[j];					
 				return;
 			} else if (k == 1) {
@@ -338,7 +356,7 @@ void BAGMRES(double *iter, double *relres, double *x){
 			tmp = zero;
 			for (j=0; j<n; j++) tmp += w[j]*V[i][j];
 			H[k][i] = tmp;
-			for (j=0; j<n; j++) w[j] = w[j] - tmp*V[i][j];
+			for (j=0; j<n; j++) w[j] -= tmp*V[i][j];
 		}
 
 		// h_{kL1, k}
@@ -469,64 +487,91 @@ void BAGMRES(double *iter, double *relres, double *x){
 }
 
 
+// Main
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
 	double *relres = NULL, *x = NULL, *iter;
 	// mwSize nzmax;
 
+	// Check the number of input arguments
     if(nrhs > 4){
-        printf("Too many inputs. Ignored extra inputs.\n");
+    	usage();
+        mexWarnMsgTxt("Too many inputs. Ignored extras.\n");
     }
 
-    if(nlhs > 4){
-        mexErrMsgTxt("Too many outputs.");
-    }
-
-    /* Check for proper number of input and output arguments */
-    if (nrhs < 3) {
-        printf("Default: stopping criterion is set to 1e-6.\n");
-    } else {
-    	eps = *(double *)mxGetPr(prhs[2]);
+    // Check the number of output arguments
+    if(nlhs > 3){
+		usage();    	
+        mexWarnMsgTxt("Too many outputs. Ignored extras.");
     }
 
     /* Check for proper number of input and output arguments */
 	if (nrhs < 2) {
+		usage();
         mexErrMsgTxt("Please input b.");
     }
 
+    // Check the number of input arguments
     if (nrhs < 1) {
-        mexErrMsgTxt("Please input data.");
+    	usage();
+        mexErrMsgTxt("Please input A.");
     }
 
+	// Check the 1st argument
     if (!mxIsSparse(prhs[0]))  {
-        mexErrMsgTxt("First argument must be a sparse array.");
+        mexErrMsgTxt("1st input argument must be a sparse array.");
     }
 
     if (mxIsComplex(prhs[0])) {
-    	mexErrMsgTxt("First argument must be a real array.");
+    	mexErrMsgTxt("1st input argument must be a real array.");
     }
-    
+
     m = (int)mxGetM(prhs[0]);
     n = (int)mxGetN(prhs[0]);
     // nnz = *((int)mxGetJc(prhs[0]) + n);
     // nzmax = mxGetNzmax(prhs[0]);
 
-    if (nrhs < 4) {
-    	maxit = n;
-    	printf("Default: max number of iterations is the number of columns.\n");
-   	} else {
-   		maxit = (int)*mxGetPr(prhs[3]);
-	}
-
-    if (mxGetM(prhs[1]) != m) {
-    	mexErrMsgTxt("The size of b is not the numer of rows of A.");
-    }   
-
     ia = mxGetIr(prhs[0]);
     jp = mxGetJc(prhs[0]);
     AC = mxGetPr(prhs[0]);
 
+	// Check the 2nd argument
+    if (mxGetM(prhs[1]) != m) {
+    	mexErrMsgTxt("The length of b is not the numer of rows of A.");
+    }    
+
     b = mxGetPr(prhs[1]);
+
+	// Check the 3rd argument
+    // Set eps
+    if (nrhs < 3) {
+        mexPrintf("Default: stopping criterion is set to 1e-6.\n");
+    } else {
+    	if (mxIsComplex(prhs[2]) || mxGetM(prhs[2])*mxGetN(prhs[2])!=1) {
+    		mexErrMsgTxt("3nd argument must be a scalar");
+    	} else {
+    		eps = *(double *)mxGetPr(prhs[2]);
+    		if (eps<zero || eps>=one) {
+    			mexErrMsgTxt("3nd argument should be positive and less than or equal to 1.");
+    		}
+    	}
+    }
+    
+	// Check the 4th argument
+	// Set maxit
+    if (nrhs < 4) {
+    	maxit = n;
+    	mexPrintf("Default: max number of iterations is set to the number of columns.\n");
+   	} else {
+   		if (mxIsComplex(prhs[3]) || mxGetM(prhs[3])*mxGetN(prhs[3])!=1) {
+    		mexErrMsgTxt("4th argument must be a scalar");
+    	} else {
+   			maxit = (int)*mxGetPr(prhs[3]);
+   			if (maxit < 1) {   				
+   				mexErrMsgTxt("4th argument must be a positive scalar");
+   			}
+   		}
+	}
 
     // Allocate x
 	if ((x = (double *)malloc(sizeof(double) * (n))) == NULL) {

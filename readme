@@ -1,5 +1,5 @@
 Matlab-Mex codes in C for the BA-GMRES method preconditioned by the NR-SOR inner iterations 
-Copyright 2014 Keiichi Morikuni morikuni@cs.cas.cz, October 7, 2014
+Copyright 2014 Keiichi Morikuni morikuni@cs.cas.cz, October 27, 2014
 URL:   http://researchmap.jp/KeiichiMorikuni/
 
 
@@ -37,13 +37,23 @@ Keiichi Morikuni morikuni@cs.cas.cz
 
 BA-GMRES preconditioned by NR-SOR inner iterations involves the following files:
 
-   BANRSOR.c 	last update October 7, 2014   
-   readme     last update October 7, 2014
+   BANRSOR.c 	last update October 27, 2014   
+   readme     last update October 27, 2014
 
 
-To compile the codes in Matlab, execute
+* To compile the codes in Matlab, execute
+  >> mex BANRSOR.c -largeArrayDims 
 
-  >> mex BANRSOR.c -largeArrayDims  
+* Then BANRSOR.mexw64 is produced. execute
+  >> [x, relres, iter] = BANRSOR(A, b);
+where A is a mxn sparse array and b is an mx1 array.
+
+* The stopping criterion tolerance and the maximum number of iterations can be
+ specified as
+  >> [x, relres, iter] = BANRSOR(A, b, tol, maxit);
+
+* To see the help, execute 
+  >> BANRSOR
 
 
 Please provide feedback if you have any questions or suggestions.

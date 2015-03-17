@@ -1,7 +1,7 @@
 /* BANRSOR.c */
 #include "mex.h"
 #include "blas.h"
-
+#include <math.h>
 
 // compressed column storage data structure
 typedef struct sparseCCS
@@ -39,8 +39,8 @@ void usage()
 // Automatic parameter tuning for NR-SOR inner iterations
 void opNRSOR(const ccs *A, double *rhs, double *Aei, double *x, double *omg, mwIndex *nin)
 {
-	double *AC = A->AC, d, e, res1, res10, res2 = zero, tmp, tmp1, tmp2, *y, *tmprhs;
-	mwIndex i, *ia = A->ia, ii, inc1 = 1, j, *jp = A->jp, k, k1, k2, l;
+	double *AC = A->AC, d, e, res1, res10, res2 = zero, tmp1, tmp2, *y, *tmprhs;
+	mwIndex i, *ia = A->ia, inc1 = 1, j, *jp = A->jp, k, k1, k2, l;
 	mwSize m = A->m, n = A->n;
 
 	// Allocate y
@@ -58,6 +58,8 @@ void opNRSOR(const ccs *A, double *rhs, double *Aei, double *x, double *omg, mwI
 
 	for (j=0; j<n; ++j) x[j] = zero;
 
+	*nin = 0;
+
 	// Tune the number of inner iterations
 	for (k=0; k<maxnin; ++k) {
 
@@ -71,87 +73,103 @@ void opNRSOR(const ccs *A, double *rhs, double *Aei, double *x, double *omg, mwI
 			for (l=k1; l<k2; ++l) rhs[ia[l]] -= d*AC[l];
 		}
 
-		d = zero;
-		e = zero;
-		for (j=0; j<n; ++j) {
+		
+		for (d = e = zero, j=0; j<n; ++j) {
 			tmp1 = fabs(x[j]);
 			tmp2 = fabs(x[j] - y[j]);
 			if (d < tmp1) d = tmp1;
 			if (e < tmp2) e = tmp2;
 		}
 
-		if (e<ipes*d || k == 100) {
-			nin = k;
-			break;
+		if (e < ieps*d) {
+			*nin = k + 1;
 
+			res10 = dnrm2(&m, rhs, &inc1);
+
+			break;
 		}
 
 		for (j=0; j<n; j++) y[j] = x[j];
 
+	}
+
+	if (*nin == 0) {
+		*nin = maxnin;
+		res10 = dnrm2(&m, rhs, &inc1);
 	}
 
 	// Tune the relaxation parameter
-	k = 20;
-	while (k--) {
-
-		omg = 1.0e-1 * (double)(k); // omg = 1.9, 1.8, ..., 0.1
-
-		for (i=0; i<m; i++) rhs[i] = tmprhs[i];
-
-		for (j=0; j<n; j++) x[j] = zero;
-
-		for (i=1; i<=nin; i++) {
-			for (j=0; j<n; j++) {
-				k1 = jp[j];
-				k2 = jp[j+1];
-				d = zero;
-				for (l=k1; l<k2; l++) d += AC[l]*rhs[ia[l]];
-				d *= omg * Aei[j];
-				x[j] += d;
-				for (l=k1; l<k2; l++) rhs[ia[l]] -= d*AC[l];
-			}
-		}
-
-		res1 = nrm2(rhs, m);
-
-		if (k < 19) {
-			if (res1 > res2) {
-				omg += 1.0e-1;
-				for (j=0; j<n; j++) x[j] = y[j];
-				return;
-			} else if (k == 1) {
-				omg = 1.0e-1;
-				return;
-			}
-		}
-
-		res2 = res1;
-
-		for (j=0; j<n; j++) y[j] = x[j];
-	}
-}
-
-
-// NR-SOR inner iterations
-void NRSOR(double *rhs, double *x)
-{
-	double d;
-	mwSize j, k, k1, k2, l;
+	*omg = 1.9;
 
 	for (j=0; j<n; j++) x[j] = zero;
 
-	for (k=1; k<=nin; k++) {
+	for (i=0; i<m; ++i) rhs[i] = tmprhs[i];
+
+	i = *nin;
+	while (i--) {
 		for (j=0; j<n; j++) {
 			k1 = jp[j];
 			k2 = jp[j+1];
 			d = zero;
 			for (l=k1; l<k2; l++) d += AC[l]*rhs[ia[l]];
-			d *= Aei[j];
+			d *= (*omg) * Aei[j];
 			x[j] += d;
-			if (k == nin && j == n-1) return;
 			for (l=k1; l<k2; l++) rhs[ia[l]] -= d*AC[l];
+		}		
+	}
+
+	res2 = dnrm2(&m, rhs, &inc1);
+
+	for (k=18; k>0; --k) {
+
+		if (k != 10) {
+
+			for (i=0; i<m; ++i) rhs[i] = tmprhs[i];
+
+			*omg = 1.0e-1 * (double)(k); // omg = 1.8, 1.7, ..., 0.1
+
+			for (i=0; i<m; i++) rhs[i] = tmprhs[i];
+
+			for (j=0; j<n; j++) x[j] = zero;
+
+			i = *nin;
+			while (i--) {
+				for (j=0; j<n; j++) {
+					k1 = jp[j];
+					k2 = jp[j+1];
+					d = zero;
+					for (l=k1; l<k2; l++) d += AC[l]*rhs[ia[l]];
+					d *= (*omg) * Aei[j];
+					x[j] += d;
+					for (l=k1; l<k2; l++) rhs[ia[l]] -= d*AC[l];
+				}
+			}
+
+			res1 = dnrm2(&m, rhs, &inc1);
+
+			if (res1 > res2) {
+				*omg += 1.0e-1;
+				for (j=0; j<n; j++) x[j] = y[j];
+				return;
+			} 
+
+			res2 = res1;
+
+			for (j=0; j<n; j++) y[j] = x[j];
+
+		} else {
+
+			if (res10 > res2) {
+				*omg = 1.1e+0;
+				for (j=0; j<n; j++) x[j] = y[j];
+				return;
+			}
+
+			res2 = res10;
 		}
 	}
+
+	return;
 }
 
 
@@ -159,54 +177,44 @@ void NRSOR(double *rhs, double *x)
 void BAGMRES(const ccs *A, double *b, mwIndex maxit, double *iter, double *relres, double *x){
 
 	double *c, *g, *r, *pt, *s, *w, *y, *tmp_x, *Aei, *AC = A->AC, *H, *V;
-	double beta, inprod, min_nrmATr, nrmATb, nrmATr, tmp, Tol;
-	int ii, k;
-	mwSize i, j, k1, k2, l;
+	double beta, d, inprod, min_nrmATr, invnrmATb, nrmBr, nrmATb, nrmATr, omg, tmp, Tol;
+	mwIndex i, *ia = A->ia, inc1 = 1, j, *jp = A->jp, k, k1, k2, kp1, l, nin, sizeHrow = maxit+1;
+	mwSize m = A->m, n = A->n;
+	char charU[1] = "U", charN[1] = "N";
 
-	// Allocate V[maxit+1]
-	if ((V = mxMalloc(sizeof(double) * (maxit+1))) == NULL) {
-		mexErrMsgTxt("Failed to allocate V");
-	} else {	// Allocate V[maxit+1][n]
-		for (j=0; j<maxit+1; j++) {
-			if ((V[j] = (double *)mxMalloc(sizeof(double) * n)) == NULL) {
-				mexErrMsgTxt("Failed to allocate V");
-			}
-		}
+	// Allocate V[n * (maxit+1)]
+	if ((V = (double *)mxMalloc(sizeof(double) * n * (sizeHrow))) == NULL) {
+		mexErrMsgTxt("Failed to allocate H");
 	}
 
 	// Allocate H[maxit]
-	if ((H = mxMalloc(sizeof(double) * (maxit))) == NULL) {
+	// // Allocate H[maxit * (maxit+1)]
+	if ((H = (double *)mxMalloc(sizeof(double) * maxit * (sizeHrow))) == NULL) {
 		mexErrMsgTxt("Failed to allocate H");
-	} else {	// Allocate H[maxit][maxit+1]
-		for (k=0; k<maxit; k++) {
-			if ((H[k] = (double *)mxMalloc(sizeof(double) * (k+2))) == NULL) {
-				mexErrMsgTxt("Failed to allocate H");
-			}
-		}
 	}
 
 	// Allocate r
-	if ((r = (double *)mxMalloc(sizeof(double) * (m))) == NULL) {
+	if ((r = (double *)mxMalloc(sizeof(double) * m)) == NULL) {
 		mexErrMsgTxt("Failed to allocate r");
 	}
 
 	// Allocate w
-	if ((w = (double *)mxMalloc(sizeof(double) * (n))) == NULL) {
+	if ((w = (double *)mxMalloc(sizeof(double) * n)) == NULL) {
 		mexErrMsgTxt("Failed to allocate w");
 	}
 
 	// Allocate tmp_x
-	if ((tmp_x = (double *)mxMalloc(sizeof(double) * (n))) == NULL) {
+	if ((tmp_x = (double *)mxMalloc(sizeof(double) * n)) == NULL) {
 		mexErrMsgTxt("Failed to allocate tmp_x");
 	}
 
 	// Allocate Aei
-	if ((Aei = (double *)mxMalloc(sizeof(double) * (n))) == NULL) {
+	if ((Aei = (double *)mxMalloc(sizeof(double) * n)) == NULL) {
 		mexErrMsgTxt("Failed to allocate Aei");
 	}
 
 	// Allocate g
-	if ((g = (double *)mxMalloc(sizeof(double) * (maxit+1))) == NULL) {
+	if ((g = (double *)mxMalloc(sizeof(double) * (sizeHrow))) == NULL) {
 		mexErrMsgTxt("Failed to allocate g");
 	}
 
@@ -225,15 +233,20 @@ void BAGMRES(const ccs *A, double *b, mwIndex maxit, double *iter, double *relre
 		mexErrMsgTxt("Failed to allocate y");
 	}
 
-	*iter = 0;
-	min_nrmATr = 2.0e+52;
+	#define V(i, j) V[i + j*n]
+	#define H(i, j) H[i + j*sizeHrow]
 
-	for (j=0; j<n; j++) {
-		inprod = zero;
-		for (l=jp[j]; l<jp[j+1]; l++) inprod += AC[l]*AC[l];
+	iter[0] = zero;
+	min_nrmATr = HUGE_VAL;
+
+	for (j=0; j<n; ++j) {
+		k1 = jp[j];
+		k2 = jp[j+1];
+		for (inprod = zero, l=k1; l<k2; ++l) inprod += AC[l]*AC[l];
 		if (inprod > zero) {
-			Aei[j] = one / inprod;			
+			Aei[j] = one / inprod;
 		} else {
+			mexPrintf("%.15e\n", AC[j]);
 			mexErrMsgTxt("'warning: ||aj|| = 0");
 		}
 	}
@@ -248,105 +261,110 @@ void BAGMRES(const ccs *A, double *b, mwIndex maxit, double *iter, double *relre
 	}
 
 	// norm of A^T b
-  	nrmATb = nrm2(w, n);
+  	nrmATb = dnrm2(&n, w, &inc1);
+  	invnrmATb = one / nrmATb;
 
   	// Stopping criterion
   	Tol = eps * nrmATb;
 
   	// r = b  (x0 = 0)
-  	for (i=0; i<m; i++) r[i] = b[i];
+  	for (i=0; i<m; ++i) r[i] = b[i];
 
   	// automatic parameter tuning for NR-SOR inner iterations: w = B r
-  	opNRSOR(r, w);   	
+  	opNRSOR(A, r, Aei, w, &omg, &nin);
 
   	// beta = norm(Bb)
-  	beta = nrm2(w, n);
+  	beta = dnrm2(&n, w, &inc1);
 
   	// beta e1
   	g[0] = beta;
- 	
+
   	tmp = one / beta;
-  	for (j=0; j<n; j++) { 
+  	for (j=0; j<n; ++j) {
   		Aei[j] *= omg;
-  		V[0][j] = tmp * w[j]; // Normalize
-  	}  	
+  		V[j] = tmp * w[j]; // Normalize
+  	}
 
   	// Main loop
-  	for (k=0; k<maxit; k++) {
+  	for (k=0; k<maxit; ++k) {
 
-		for (i=0; i<m; i++) r[i] = zero;
-	 	for (j=0; j<n; j++) {
-	 		tmp = V[k][j];
+		for (i=0; i<m; ++i) r[i] = zero;
+	 	for (j=0; j<n; ++j) {
+	 		tmp = V(j, k);
 	 		k1 = jp[j];
 			k2 = jp[j+1];
-	 		for (l=k1; l<k2; l++) r[ia[l]] += tmp*AC[l];
+	 		for (l=k1; l<k2; ++l) r[ia[l]] += tmp*AC[l];
 	 	}
 
 	 	// NR-SOR inner iterations: w = B r
-		NRSOR(r, w);	 
+		// NRSOR(r, w);
+		for (j=0; j<n; j++) w[j] = zero;
+		i = nin;
+		while (i--) {
+			for (j=0; j<n; j++) {
+				k1 = jp[j];
+				k2 = jp[j+1];
+				d = zero;
+				for (l=k1; l<k2; l++) d += AC[l]*r[ia[l]];
+				d *= Aei[j];
+				w[j] += d;
+				if (i==0 && j == n-1) break;
+				for (l=k1; l<k2; l++) r[ia[l]] -= d*AC[l];
+			}
+		}
 
 		// Modified Gram-Schmidt orthogonzlization
-		for (i=0; i<k+1; i++) {
-			tmp = zero;
-			for (j=0; j<n; j++) tmp += w[j]*V[i][j];			
-			for (j=0; j<n; j++) w[j] -= tmp*V[i][j];
-			H[k][i] = tmp;
+		for (kp1=k+1, i=0; i<kp1; ++i) {
+			pt = &V[i*n];
+			tmp = -ddot(&n, w, &inc1, pt, &inc1);
+			daxpy(&n, &tmp, pt, &inc1, w, &inc1);
+			H(i, k) = -tmp;
 		}
 
 		// h_{kL1, k}
-		tmp = nrm2(w, n);
-		H[k][k+1] = tmp;
+		tmp = dnrm2(&n, w, &inc1);
+		H(kp1, k) = tmp;
 
 		// Check breakdown
-		if (H[k][k+1] > zero) {
-			tmp = one / tmp;
-			for (j=0; j<n; j++) V[k+1][j] = tmp * w[j];
+		if (tmp > zero) {
+			for (tmp=one/tmp, j=0; j<n; ++j) V(j, kp1) = tmp * w[j];
 		} else {
-			printf("h_k+1, k = %.15e, at step %d\n", H[k][k+1], k+1);
+			mexPrintf("h_{k+1, k} = %.15e, at step %d\n", H(kp1, k), kp1);
 			mexErrMsgTxt("Breakdown.");
 		}
 
 		// Apply Givens rotations
-		for (i=0; i<k; i++) {
-			tmp = c[i]*H[k][i] + s[i]*H[k][i+1];
-			H[k][i+1] = -s[i]*H[k][i] + c[i]*H[k][i+1];
-			H[k][i] = tmp;
-		}	
-
-		tmp = H[k][k];
+		for (i=0; i<k; ++i) {
+			tmp = c[i]*H(i, k) + s[i]*H(i+1, k);
+			H(i+1, k) = -s[i]*H(i, k) + c[i]*H(i+1, k);
+			H(i, k) = tmp;
+		}
 
 		// Compute Givens rotations
-		drotg(&tmp, &H[k][k+1], &c[k], &s[k]);
-
-		H[k][k] = one / tmp;		
+		drotg(&H(k, k), &H(kp1, k), &c[k], &s[k]);
 
 		// Apply Givens rotations
-		g[k+1] = -s[k] * g[k];
-		g[k] *= c[k];
+		tmp = -s[k] * g[k];
+		nrmBr = fabs(tmp);
+		g[kp1] = tmp;
+		g[k] = c[k] * g[k];
 
-		relres[k] = fabs(g[k+1]) / beta; 
+		relres[k] = fabs(g[k+1]) / beta;
 
-		// printf("%.15e\n", relres[k]);
+		// mexPrintf("%d, %.15e, %.15e\n", k, eps, relres[k]);
 
   		if (relres[k] < eps) {
 
 			// Derivation of the approximate solution x_k
-			// Backward substitution		
-			y[k] = g[k] * H[k][k];
-			ii = k;
-			while (ii--) {	
-				tmp = zero;
-				for (l=ii+1; l<k; l++) tmp += H[l][ii]*y[l];
-				y[ii] = (g[ii] - tmp) * H[ii][ii];
-			}
+			for (i=0; i<kp1; ++i) y[i] = g[i];
+
+			// Backward substitution
+			dtrsv(charU, charN, charN, &kp1, H, &sizeHrow, y, &inc1);
 
 			// x = V y
-			for (j=0; j<n; j++) x[j] = zero;
-			for (l=0; l<k+1; l++) {
-				for (j=0; j<n; j++) x[j] += V[l][j]*y[l];
-			}
+			dgemv(charN, &n, &kp1, &one, &V[0], &n, y, &inc1, &zero, x, &inc1);
 
-			// r = A x 	
+			// r = A x
 			for (i=0; i<m; i++) r[i] = zero;
 	 		for (j=0; j<n; j++) {
 	 			tmp = x[j];
@@ -365,20 +383,18 @@ void BAGMRES(const ccs *A, double *b, mwIndex maxit, double *iter, double *relre
 				w[j] = tmp;
 			}
 
-		 	nrmATr = nrm2(w, n);
+		 	nrmATr = dnrm2(&n, w, &inc1);
 
 		 	if (nrmATr < min_nrmATr) {
 	 			for (j=0; j<n; j++) x[j] = tmp_x[j];
 	 			min_nrmATr = nrmATr;
-	 			*iter = k+1;
+	 			iter[0] = (double)(kp1);
 	 		}
 
-			// printf("%d, %.15e\n", k, nrm2(w, n)/nrmATb);
+			// mexPrintf("%d, %.15e\n", k, dnrm2(&n, w, &inc1)/nrmATb);
 
 		 	// Convergence check
 		  	if (nrmATr < Tol) {
-
-				*iter = k+1;
 
 				mxFree(y);
 				mxFree(s);
@@ -388,16 +404,8 @@ void BAGMRES(const ccs *A, double *b, mwIndex maxit, double *iter, double *relre
 				mxFree(Aei);
 				mxFree(w);				
 				mxFree(r);		
-				
-
-				i = maxit;
-				while (i--) mxFree(H[i]);
-				mxFree(H);	
-
-				j = maxit + 1;
-		  		while (j--) mxFree(V[j]);
+				mxFree(H);
 				mxFree(V);	
-
 
   				// printf("Required number of iterations: %d\n", (int)(*iter));
   				printf("Successfully converged.\n");  				
@@ -410,45 +418,20 @@ void BAGMRES(const ccs *A, double *b, mwIndex maxit, double *iter, double *relre
 
 	mexPrintf("Failed to converge.\n");
 
-	if (*iter == 0) {
+	// Derivation of the approximate solution x_k
+	if (iter[0] == 0.0) {
 
-		k = k-1;
-
-		// Derivation of the approximate solution x_k
+		for (i=0; i<k; ++i) y[i] = g[i];
+	
 		// Backward substitution		
-		y[k] = g[k] * H[k][k];
-		ii = k;
-		while (ii--) {		
-			tmp = zero;
-			for (l=ii+1; l<k; l++) tmp += H[l][ii]*y[l];
-			y[ii] = (g[ii] - tmp) * H[ii][ii];
-		}
+		dtrsv(charU, charN, charN, &kp1, H, &sizeHrow, y, &inc1);
 
 		// x = V y
 		for (j=0; j<n; j++) x[j] = zero;
-		for (l=0; l<k; l++) {
-			for (j=0; j<n; j++) x[j] += V[l][j]*y[l];
-		}
+		dgemv(charN, &n, &k, &one, &V[0], &n, y, &inc1, &zero, x, &inc1);
 
-		*iter = k;
+		iter[0] = (double)(k);
 	}
-
-	// Derivation of the approximate solution x_k
-	// Backward substitution
-	y[k] = g[k] * H[k][k];
-	for (ii=k-1; ii>-1; ii--) {
-		tmp = zero;
-		for (l=ii+1; l<k; l++) tmp += H[l][ii]*y[l];
-		y[ii] = (g[ii] - tmp) * H[ii][ii];
-	}
-
-	// x = V y
-	for (j=0; j<n; j++) x[j] = zero;
-	for (l=0; l<k+1; l++) {
-		for (j=0; j<n; j++) x[j] += V[l][j]*y[l];
-	}
-
-	*iter = k;
 
 	mxFree(y);
 	mxFree(s);
@@ -458,19 +441,7 @@ void BAGMRES(const ccs *A, double *b, mwIndex maxit, double *iter, double *relre
 	mxFree(Aei);
 	mxFree(w);
 	mxFree(r);
-
-	if (nrmATr < min_nrmATr) {
-		for (j=0; j<n; j++) x[j] = tmp_x[j];
-		min_nrmATr = nrmATr;
-		*iter = k+1;
-	}
-
-	i = maxit;
-	while (i--) mxFree(H[i]);
 	mxFree(H);
-
-	j = maxit + 1;
-	while (j--) mxFree(V[j]);
 	mxFree(V);
 
 }

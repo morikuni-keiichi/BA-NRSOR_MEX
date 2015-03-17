@@ -37,12 +37,13 @@ Keiichi Morikuni morikuni@cs.cas.cz
 
 BA-GMRES preconditioned by NR-SOR inner iterations involves the following files:
 
-   BANRSOR.c 	last update October 27, 2014   
-   readme     last update October 27, 2014
+   BANRSOR.c 	last update March 14, 2015
+   readme     last update March 14, 2015
 
 
 * To compile the codes in Matlab, execute
-  >> mex BANRSOR.c -largeArrayDims 
+  >> blaslib = fullfile(matlabroot, 'extern', 'lib', computer('arch'), 'microsoft', 'libmwblas.lib');
+  >> mex('-largeArrayDims', 'ABNESOR.c', blaslib)
 
 * Then BANRSOR.mexw64 is produced. execute
   >> [x, relres, iter] = BANRSOR(A, b);
